@@ -58,6 +58,14 @@ Edit `.env` to set `OPENWEATHER_API_KEY` (and optional overrides).
 docker run --rm -v "$(pwd)/data:/app/data" --env-file .env weather-etl
 ```
 
+## Docker Compose (recommended for sharing)
+Build and run via Compose so others can replicate easily:
+```bash
+docker compose build
+docker compose run --rm etl  # single run (uses .env)
+```
+The compose file (`docker-compose.yml`) builds the image, mounts `./data` to `/app/data`, and loads env vars from `.env`.
+
 ## Configuration
 Required:
 - `OPENWEATHER_API_KEY` (from https://openweathermap.org/appid#apikey)

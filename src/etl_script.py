@@ -13,8 +13,8 @@ import requests
 
 API_URL = "https://api.openweathermap.org/data/2.5/weather"
 API_KEY = os.getenv("OPENWEATHER_API_KEY")
-# default poll interval: 5 minutes
-POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "300"))
+# default poll interval: 24 hours
+POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "86400"))
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() in {"1", "true", "yes"}
 DEFAULT_CITIES: List[Dict[str, float | str]] = [
     {"city_name": "Amsterdam", "latitude": 52.3676, "longitude": 4.9041},
