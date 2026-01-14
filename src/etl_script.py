@@ -1,10 +1,12 @@
 """Standalone ETL to fetch current weather and persist to SQLite."""
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import time
-from datetime import datetime, timezone
+import importlib.util
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -16,12 +18,15 @@ API_KEY = os.getenv("OPENWEATHER_API_KEY")
 # default poll interval: 24 hours
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "86400"))
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() in {"1", "true", "yes"}
+EXPORT_LATEST_DAYS = int(os.getenv("EXPORT_LATEST_DAYS", "7"))
 DEFAULT_CITIES: List[Dict[str, float | str]] = [
     {"city_name": "Amsterdam", "latitude": 52.3676, "longitude": 4.9041},
     {"city_name": "Rotterdam", "latitude": 51.9244, "longitude": 4.4777},
     {"city_name": "Eindhoven", "latitude": 51.4416, "longitude": 5.4697},
 ]
 DB_PATH = Path(__file__).resolve().parents[1] / "data" / "weather.db"
+CITIES_CONFIG_DEFAULT = Path(__file__).resolve().parents[1] / "cities.json"
+EXPORT_DIR = Path(__file__).resolve().parents[1] / "data" / "exports"
 
 
 def fetch_weather(latitude: float, longitude: float) -> Dict[str, Any]:
@@ -78,7 +83,7 @@ def transform_weather(raw: Dict[str, Any], city_name: str) -> pd.DataFrame:
 
 
 def get_city_targets() -> List[Dict[str, float | str]]:
-    """Return city targets from env override or default Netherlands cities."""
+    """Return city targets from env override, config file, or defaults."""
     city = os.getenv("CITY_NAME")
     lat = os.getenv("LATITUDE")
     lon = os.getenv("LONGITUDE")
@@ -91,6 +96,31 @@ def get_city_targets() -> List[Dict[str, float | str]]:
                 "longitude": float(lon),
             }
         ]
+
+    config_path_env = os.getenv("CITIES_CONFIG")
+    config_path = Path(config_path_env) if config_path_env else CITIES_CONFIG_DEFAULT
+
+    if config_path.exists():
+        try:
+            with config_path.open() as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                raise ValueError("cities config must be a list of objects")
+            cities: List[Dict[str, float | str]] = []
+            for idx, item in enumerate(data):
+                if not all(key in item for key in ("city_name", "latitude", "longitude")):
+                    raise ValueError(f"City entry at index {idx} missing required keys")
+                cities.append(
+                    {
+                        "city_name": str(item["city_name"]),
+                        "latitude": float(item["latitude"]),
+                        "longitude": float(item["longitude"]),
+                    }
+                )
+            if cities:
+                return cities
+        except Exception as exc:  # noqa: BLE001
+            print(f"Failed to load cities config {config_path}: {exc}. Falling back to defaults.")
 
     return DEFAULT_CITIES
 
@@ -124,6 +154,43 @@ def load_to_sqlite(df: pd.DataFrame, db_path: Path) -> None:
         df.to_sql("weather", conn, if_exists="append", index=False)
 
 
+def export_recent(db_path: Path, export_dir: Path, days: int) -> None:
+    """Export recent rows to CSV (and Parquet if available) for sharing/analysis."""
+    if days <= 0:
+        return
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    with sqlite3.connect(db_path) as conn:
+        df = pd.read_sql_query(
+            "SELECT id, city_name, temperature_c, temperature_f, wind_speed, fetched_at FROM weather WHERE fetched_at >= ? ORDER BY fetched_at DESC",
+            conn,
+            params=[cutoff.isoformat()],
+        )
+
+    if df.empty:
+        print(f"No rows to export for the last {days} day(s).")
+        return
+
+    export_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = export_dir / f"weather_last_{days}d.csv"
+    df.to_csv(csv_path, index=False)
+    print(f"Exported CSV -> {csv_path}")
+
+    # Parquet is optional; skip quietly if no engine is available
+    has_pyarrow = importlib.util.find_spec("pyarrow") is not None
+    has_fastparquet = importlib.util.find_spec("fastparquet") is not None
+    if not (has_pyarrow or has_fastparquet):
+        print("Parquet export skipped (install pyarrow or fastparquet to enable).")
+        return
+
+    parquet_path = export_dir / f"weather_last_{days}d.parquet"
+    try:
+        df.to_parquet(parquet_path, index=False)
+        print(f"Exported Parquet -> {parquet_path}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Parquet export skipped: {exc}")
+
+
 def run_pipeline() -> None:
     """Execute extract -> transform -> load steps."""
     init_db(DB_PATH)
@@ -151,6 +218,7 @@ def run_pipeline() -> None:
             print(
                 f"Inserted {len(combined)} row(s) for {[c['city_name'] for c in get_city_targets()]} into {DB_PATH}"
             )
+            export_recent(DB_PATH, EXPORT_DIR, EXPORT_LATEST_DAYS)
         else:
             print("No data inserted; all fetches failed.")
 

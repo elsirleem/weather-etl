@@ -1,14 +1,14 @@
 # Project Requirements Document (PRD): Weather ETL Pipeline
 
 ## 1. Executive Summary
-The goal is to build a standalone, containerized ETL (Extract, Transform, Load) pipeline. This application will fetch real-time weather data from a public API, clean/transform the data using Python, and persist it into a local SQLite database. The entire application will be wrapped in Docker to ensure portability and reproducibility.
+Build a standalone, containerized ETL (Extract, Transform, Load) pipeline that fetches current weather from OpenWeather, cleans/transforms it with Python, and persists history into a local SQLite database mounted from the host. The application is wrapped in Docker/Compose for portability and reproducibility.
 
 ## 2. Objectives
-* **Data Ingestion:** Automate the retrieval of weather data from the Open-Meteo API.
-* **Data Integrity:** Ensure data types and units are consistent before storage.
-* **Portability:** Containerize the environment using Docker.
-* **Persistence:** Utilize Docker Volumes to ensure data persists after the container stops.
-* **Version Control:** Maintain a professional Git workflow.
+- **Data Ingestion:** Automate the retrieval of weather data from the OpenWeather API.
+- **Data Integrity:** Ensure data types and units are consistent before storage.
+- **Portability:** Containerize the environment using Docker/Compose.
+- **Persistence:** Use a mounted data directory so SQLite persists after the container stops.
+- **Version Control:** Maintain a professional Git workflow.
 
 ## 3. Technology Stack
 | Component | Technology | Description |
@@ -17,49 +17,57 @@ The goal is to build a standalone, containerized ETL (Extract, Transform, Load) 
 | **Extraction** | `requests` | HTTP library for API calls |
 | **Transformation** | `pandas` | Data cleaning and dataframe manipulation |
 | **Storage** | SQLite | Serverless, file-based database |
-| **Containerization** | Docker | Image building and container runtime |
+| **Containerization** | Docker + Compose | Image building and container runtime |
 | **VCS** | Git / GitHub | Source code management |
 
 ## 4. Functional Requirements
 
 ### 4.1. Extract (Source)
-* **Source:** [Open-Meteo API](https://open-meteo.com/)
-* **Parameters:**
-    * **Latitude/Longitude:** Hardcoded to a specific city (e.g., London: 51.5074, -0.1278).
-    * **Metrics:** `current_weather=true` (Temperature, Windspeed, Wind Direction).
-* **Behavior:** The script runs once per execution (Batch processing).
+- **Source:** [OpenWeather API](https://openweathermap.org/api)
+- **Parameters:**
+  - **Latitude/Longitude:** Configurable via `cities.json` (defaults: Amsterdam, Rotterdam, Eindhoven) or a single-city env override (`CITY_NAME/LATITUDE/LONGITUDE`).
+  - **Units:** Metric; captures temperature and wind speed.
+- **Behavior:** Supports continuous polling (default 24h) or single-run via `RUN_ONCE=true`.
 
 ### 4.2. Transform (Logic)
-* **Data Cleaning:** Handle potential missing values (drop rows with null critical fields).
-* **Calculations:** * Convert Temperature from Celsius to Fahrenheit ($T_F = T_C \times 9/5 + 32$).
-    * Add a timestamp column (`fetched_at`) in UTC.
-* **Formatting:** Ensure numeric columns are strictly `float` or `int`.
+- **Data Cleaning:** Handle potential missing values.
+- **Calculations:** Convert Celsius to Fahrenheit: $T_F = T_C \times 9/5 + 32$.
+- **Timestamps:** Add `fetched_at` in UTC ISO format.
+- **Types:** Ensure numeric columns are floats.
 
 ### 4.3. Load (Destination)
-* **Target:** Local SQLite database file (`weather.db`).
-* **Schema Definition:**
-    * `id` (Integer, PK, Autoincrement)
-    * `city_name` (String)
-    * `temperature_c` (Float)
-    * `temperature_f` (Float)
-    * `wind_speed` (Float)
-    * `fetched_at` (Datetime)
-* **Operation:** Append mode (do not overwrite existing history).
+- **Target:** Local SQLite database file (`weather.db`).
+- **Schema Definition:**
+  - `id` (Integer, PK, Autoincrement)
+  - `city_name` (String)
+  - `temperature_c` (Float)
+  - `temperature_f` (Float)
+  - `wind_speed` (Float)
+  - `fetched_at` (Datetime)
+- **Operation:** Append mode (do not overwrite existing history).
+- **Exports:** After each load, recent rows (default 7 days) exported to CSV (guaranteed) and Parquet if a compatible engine (`pyarrow` or `fastparquet`) is installed.
 
 ## 5. Non-Functional Requirements
 
 ### 5.1. Containerization & Environment
-* **Base Image:** `python:3.9-slim` (for lightweight footprint).
-* **Persistence Strategy:** The database file must be stored in a directory mounted via Docker Volumes (e.g., `/app/data`) to prevent data loss on container exit.
-* **Reproducibility:** A `requirements.txt` file must list all dependencies with version numbers.
+- **Base Image:** `python:3.9-slim`.
+- **Persistence Strategy:** Database stored in `/app/data` mounted from host `./data` via Compose.
+- **Reproducibility:** `requirements.txt` lists dependencies; Dockerfile and docker-compose ensure consistent runs.
 
 ### 5.2. Directory Structure
-```text
-weather-etl-docker/
-├── data/                 # Mounted volume target (Ignored by Git)
+```
+weather-etl/
+├── data/                 # Mounted volume target (ignored by Git)
 ├── src/
 │   └── etl_script.py     # Main logic
+├── scripts/
+│   └── plot_recent.py    # Quick visualization
+├── cities.json           # Default cities config
+├── schema.sql            # SQLite schema
 ├── Dockerfile            # Container definition
+├── docker-compose.yml    # Compose config (mounts ./data, loads .env)
 ├── requirements.txt      # Python dependencies
-├── .gitignore            # Security & cleanup rules
+├── .env.example          # Sample env
+├── run.sh                # Convenience runner
 └── README.md             # Documentation
+```

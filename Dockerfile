@@ -9,6 +9,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src ./src
+COPY cities.json ./cities.json
 RUN mkdir -p /app/data
 
 VOLUME ["/app/data"]
