@@ -2,6 +2,9 @@
 
 Containerized Python ETL that fetches current weather from OpenWeather, cleans/transforms it with pandas, and persists history into a SQLite database mounted via Docker volume.
 
+## Architecture
+![Weather ETL Pipeline Architecture](docs/architecture.png)
+
 ## Features
 - Configurable city list via `cities.json` or `CITIES_CONFIG` env override; single-city override via `CITY_NAME/LATITUDE/LONGITUDE`.
 - Persists snapshots to `data/weather.db` (SQLite).
